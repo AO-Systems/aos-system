@@ -19,4 +19,7 @@ export interface Record {
   content: string;
   timestamp: string;
   userName?: string;
+  status: 'new' | 'in-progress' | 'completed';
+  response?: string;
+  responseTimestamp?: string;
 }

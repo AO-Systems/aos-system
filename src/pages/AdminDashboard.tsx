@@ -1,13 +1,14 @@
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/context/AuthContext";
 import { useRecords } from "@/context/RecordsContext";
-import { User } from "@/types/auth";
+import { User, Record } from "@/types/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -32,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Tabs,
@@ -39,17 +41,29 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatDistanceToNow } from "date-fns";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 
 const AdminDashboard = () => {
   const { getAllUsers, updateBalance } = useAuth();
-  const { records, addRecord } = useRecords();
+  const { records, addRecord, respondToRecord, updateRecordStatus } = useRecords();
   const { toast } = useToast();
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<Record | null>(null);
   const [newBalance, setNewBalance] = useState("");
   const [newRecord, setNewRecord] = useState("");
+  const [responseText, setResponseText] = useState("");
+  const [responseStatus, setResponseStatus] = useState<'new' | 'in-progress' | 'completed'>('completed');
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [responseDialogOpen, setResponseDialogOpen] = useState(false);
 
   const users = getAllUsers();
   const filteredUsers = users.filter(user => 
@@ -57,10 +71,23 @@ const AdminDashboard = () => {
     user.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const filteredRecords = useMemo(() => {
+    let filtered = records;
+    
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(record => record.status === statusFilter);
+    }
+    
+    return filtered.sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }, [records, statusFilter]);
+
   const handleSelectUser = (user: User) => {
     setSelectedUser(user);
     setNewBalance(user.balance.toString());
     setNewRecord("");
+    setSelectedRecord(null);
   };
 
   const handleUpdateBalance = () => {
@@ -81,6 +108,11 @@ const AdminDashboard = () => {
     
     // Update local selectedUser state
     setSelectedUser({ ...selectedUser, balance });
+    
+    toast({
+      title: "Balance Updated",
+      description: `${selectedUser.name}'s balance has been updated to $${balance.toFixed(2)}`,
+    });
   };
 
   const handleAddRecord = () => {
@@ -93,6 +125,38 @@ const AdminDashboard = () => {
       title: "Record Added",
       description: `Record added for ${selectedUser.name}.`,
     });
+  };
+
+  const handleOpenResponseDialog = (record: Record) => {
+    setSelectedRecord(record);
+    setResponseText(record.response || "");
+    setResponseStatus(record.status);
+    setResponseDialogOpen(true);
+  };
+
+  const handleSubmitResponse = () => {
+    if (!selectedRecord || !responseText.trim()) return;
+    
+    respondToRecord(selectedRecord.id, responseText, responseStatus);
+    setResponseDialogOpen(false);
+    
+    toast({
+      title: "Response Sent",
+      description: `Your response to ${selectedRecord.userName} has been sent.`,
+    });
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch(status) {
+      case 'new':
+        return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">New</Badge>;
+      case 'in-progress':
+        return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">In Progress</Badge>;
+      case 'completed':
+        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Completed</Badge>;
+      default:
+        return <Badge variant="outline">Unknown</Badge>;
+    }
   };
 
   return (
@@ -188,7 +252,9 @@ const AdminDashboard = () => {
                             <TableHeader>
                               <TableRow>
                                 <TableHead>Request</TableHead>
+                                <TableHead>Status</TableHead>
                                 <TableHead>Time</TableHead>
+                                <TableHead></TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -200,8 +266,21 @@ const AdminDashboard = () => {
                                 .map(record => (
                                   <TableRow key={record.id}>
                                     <TableCell>{record.content}</TableCell>
+                                    <TableCell>{getStatusBadge(record.status)}</TableCell>
                                     <TableCell>
                                       {formatDistanceToNow(new Date(record.timestamp), { addSuffix: true })}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenResponseDialog(record);
+                                        }}
+                                      >
+                                        {record.response ? "Edit Response" : "Respond"}
+                                      </Button>
                                     </TableCell>
                                   </TableRow>
                                 ))}
@@ -269,10 +348,26 @@ const AdminDashboard = () => {
         
         {/* All Records Section */}
         <Card>
-          <CardHeader>
-            <CardTitle>System Records</CardTitle>
+          <CardHeader className="space-y-1">
+            <div className="flex justify-between items-center">
+              <CardTitle>System Records</CardTitle>
+              <Select
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Records</SelectItem>
+                  <SelectItem value="new">New</SelectItem>
+                  <SelectItem value="in-progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <CardDescription>
-              View all records across all users
+              View and respond to all records across all users
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -283,30 +378,96 @@ const AdminDashboard = () => {
                     <TableHead>User</TableHead>
                     <TableHead>AOID</TableHead>
                     <TableHead>Request</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Time</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {records
-                    .sort((a, b) => 
-                      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-                    )
-                    .map(record => (
-                      <TableRow key={record.id}>
-                        <TableCell className="font-medium">{record.userName}</TableCell>
-                        <TableCell>{record.userId}</TableCell>
-                        <TableCell>{record.content}</TableCell>
-                        <TableCell>
-                          {formatDistanceToNow(new Date(record.timestamp), { addSuffix: true })}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                  {filteredRecords.map(record => (
+                    <TableRow key={record.id} className={record.status === 'new' ? 'bg-blue-50' : ''}>
+                      <TableCell className="font-medium">{record.userName}</TableCell>
+                      <TableCell>{record.userId}</TableCell>
+                      <TableCell>
+                        {record.content}
+                        {record.response && (
+                          <div className="mt-1 text-xs text-gray-500 italic">
+                            Response: {record.response.substring(0, 30)}{record.response.length > 30 ? '...' : ''}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>{getStatusBadge(record.status)}</TableCell>
+                      <TableCell>
+                        {formatDistanceToNow(new Date(record.timestamp), { addSuffix: true })}
+                      </TableCell>
+                      <TableCell>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenResponseDialog(record)}
+                        >
+                          {record.response ? "Edit Response" : "Respond"}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Response Dialog */}
+      <Dialog open={responseDialogOpen} onOpenChange={setResponseDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Respond to Request</DialogTitle>
+            <DialogDescription>
+              {selectedRecord?.userName}'s request from {selectedRecord ? formatDistanceToNow(new Date(selectedRecord.timestamp), { addSuffix: true }) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="bg-gray-50 p-3 rounded-md">
+              <p className="text-gray-600">{selectedRecord?.content}</p>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="response">Your Response</Label>
+              <Textarea
+                id="response"
+                placeholder="Enter your response..."
+                className="min-h-[120px]"
+                value={responseText}
+                onChange={(e) => setResponseText(e.target.value)}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="status">Update Status</Label>
+              <Select
+                value={responseStatus}
+                onValueChange={(value) => setResponseStatus(value as 'new' | 'in-progress' | 'completed')}
+              >
+                <SelectTrigger id="status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="new">New</SelectItem>
+                  <SelectItem value="in-progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResponseDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmitResponse} disabled={!responseText.trim()}>
+              Submit Response
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };
