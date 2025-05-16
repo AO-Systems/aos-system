@@ -20,7 +20,7 @@ export const Header = () => {
       <div className="container mx-auto px-4 py-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold ember-logo">
-            EMBER<span className="text-black">KEEPER</span>
+            AOS<span className="text-black">SYSTEM</span>
           </h1>
           <span className="bg-ember-100 text-ember-800 text-xs px-2 py-1 rounded-full">
             {user.role === 'admin' ? 'Admin' : 'User'}
